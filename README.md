@@ -1,98 +1,258 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Forum API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Simple Q&A Forum REST API — **NestJS 11** · **Prisma 7** · **PostgreSQL**
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## Tech Stack
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+| Layer | Technology |
+|---|---|
+| Framework | NestJS 11 |
+| ORM | Prisma 7 |
+| Database | PostgreSQL |
+| Auth | JWT (`@nestjs/jwt` + `passport-jwt`) |
+| Validation | `class-validator` + `class-transformer` |
+| Docs | Swagger UI (`@nestjs/swagger`) |
 
-## Project setup
+---
 
-```bash
-$ npm install
+## Arsitektur
+
+Setiap request mengalir satu arah:
+
+```
+Controller  →  Service  →  Repository  →  PrismaService  →  PostgreSQL
 ```
 
-## Compile and run the project
+| Layer | Tanggung Jawab |
+|---|---|
+| **Controller** | Terima HTTP request, delegate ke Service, kembalikan response |
+| **Service** | Business logic, validasi kepemilikan, mapping ke ResponseDto |
+| **Repository** | Semua query Prisma — Service tidak pernah sentuh Prisma langsung |
+| **PrismaService** | Koneksi ke PostgreSQL via adapter |
 
-```bash
-# development
-$ npm run start
+### Konvensi DTO
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+```
+dto/
+├── request/    → input dari client, berisi decorator @IsString, @IsEmail, dll
+└── response/   → output ke client, berisi shape yang aman (tanpa passwordHash)
 ```
 
-## Run tests
+Mapping dari Prisma result → ResponseDto dilakukan di **Service**, bukan di Controller.
 
-```bash
-# unit tests
-$ npm run test
+---
 
-# e2e tests
-$ npm run test:e2e
+## Folder Structure
 
-# test coverage
-$ npm run test:cov
+```
+code-challange-2/
+│
+├── prisma/
+│   ├── schema.prisma               # Definisi model User & Thread
+│   ├── seed.ts                     # Dummy data (johndoe, janedoe + 3 threads)
+│   └── migrations/                 # Auto-generated oleh prisma migrate
+│
+├── src/
+│   │
+│   ├── generated/
+│   │   └── prisma/                 # Auto-generated oleh prisma generate
+│   │
+│   ├── prisma/
+│   │   ├── prisma.service.ts       # PrismaClient wrapper, connect/disconnect lifecycle
+│   │   └── prisma.module.ts        # @Global() — tersedia di seluruh app tanpa re-import
+│   │
+│   ├── common/
+│   │   ├── decorators/
+│   │   │   └── current-user.decorator.ts   # @CurrentUser() — ambil user dari JWT
+│   │   └── filters/
+│   │       └── http-exception.filter.ts    # Normalisasi semua error response
+│   │
+│   ├── auth/
+│   │   ├── dto/
+│   │   │   ├── request/
+│   │   │   │   ├── register.request.dto.ts  # username, email, password (dengan validasi)
+│   │   │   │   └── login.request.dto.ts     # email, password
+│   │   │   └── response/
+│   │   │       └── auth.response.dto.ts     # message, access_token, user
+│   │   ├── repositories/
+│   │   │   └── auth.repository.ts   # findByEmail, findByEmailOrUsername, createUser
+│   │   ├── auth.controller.ts       # POST /auth/register, POST /auth/login
+│   │   ├── auth.service.ts          # bcrypt hash/compare, sign JWT, return AuthResponseDto
+│   │   ├── auth.module.ts           # Wiring: JwtModule, PassportModule, AuthRepository
+│   │   ├── jwt.strategy.ts          # Verifikasi Bearer token, isi request.user
+│   │   └── jwt-auth.guard.ts        # @UseGuards(JwtAuthGuard) — proteksi route
+│   │
+│   ├── users/
+│   │   ├── dto/
+│   │   │   └── response/
+│   │   │       └── user.response.dto.ts  # id, username, email, createdAt, threadCount
+│   │   ├── repositories/
+│   │   │   └── users.repository.ts  # findById (tanpa passwordHash)
+│   │   ├── users.controller.ts      # GET /users/:id
+│   │   ├── users.service.ts         # findById, throw 404, return UserResponseDto
+│   │   └── users.module.ts
+│   │
+│   ├── threads/
+│   │   ├── dto/
+│   │   │   ├── request/
+│   │   │   │   ├── create-thread.request.dto.ts  # title, content
+│   │   │   │   └── update-thread.request.dto.ts  # title?, content? (opsional)
+│   │   │   └── response/
+│   │   │       └── thread.response.dto.ts  # id, title, content, author, timestamps
+│   │   ├── repositories/
+│   │   │   └── threads.repository.ts  # create, findAll, findByUserId, findById, update, delete
+│   │   ├── threads.controller.ts    # 6 endpoints thread
+│   │   ├── threads.service.ts       # CRUD + ownership check (assertOwnership)
+│   │   └── threads.module.ts
+│   │
+│   ├── app.module.ts                # Root module, import semua modul
+│   └── main.ts                      # Bootstrap, ValidationPipe, Swagger setup
+│
+├── prisma.config.ts                 # Konfigurasi Prisma 7 (datasource URL)
+├── .env                             # Environment variables (tidak di-commit)
+├── .env.example                     # Template .env untuk tim
+├── .gitignore
+├── package.json
+├── tsconfig.json
+└── nest-cli.json
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Setup & Running
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 1. Clone & install
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+git clone <your-repo-url>
+cd forum-api
+npm install
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 2. Konfigurasi environment
 
-## Resources
+```bash
+cp .env.example .env
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+Edit `.env`:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```env
+PORT=3000
+DATABASE_URL="postgresql://postgres:password@localhost:5432/forum_db?schema=public"
+JWT_SECRET="ganti-dengan-string-random-yang-panjang"
+JWT_EXPIRES_IN="7d"
+```
 
-## Support
+### 3. Setup database
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+# Buat database forum_db di PostgreSQL terlebih dahulu, lalu:
+npx prisma migrate dev --name init
 
-## Stay in touch
+# Generate Prisma Client ke src/generated/prisma/
+npx prisma generate
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### 4. Seed dummy data (opsional)
 
-## License
+```bash
+npm run prisma:seed
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Hasil seed:
+
+| Username | Email | Password |
+|---|---|---|
+| johndoe | johndoe@example.com | password123 |
+| janedoe | jane@example.com | password123 |
+
+### 5. Jalankan server
+
+```bash
+# Development (hot reload)
+npm run start:dev
+
+# Production
+npm run build && npm run start:prod
+```
+
+### 6. Buka Swagger UI
+
+```
+http://localhost:3000/api/docs
+```
+
+---
+
+## API Endpoints
+
+### Auth — tidak butuh token
+
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| POST | `/api/auth/register` | Daftar user baru, password di-hash bcrypt |
+| POST | `/api/auth/login` | Login, return JWT token |
+
+### Users — tidak butuh token
+
+| Method | Endpoint | Deskripsi |
+|---|---|---|
+| GET | `/api/users/:id` | Lihat profil publik user |
+
+### Threads
+
+| Method | Endpoint | Auth | Deskripsi |
+|---|---|---|---|
+| POST | `/api/threads` | ✅ | Buat thread baru |
+| GET | `/api/threads` | ❌ | List semua thread |
+| GET | `/api/threads/my-threads` | ✅ | Thread milik user yang login |
+| GET | `/api/threads/:id` | ❌ | Detail thread by ID |
+| PUT | `/api/threads/:id` | ✅ owner | Update thread |
+| DELETE | `/api/threads/:id` | ✅ owner | Hapus thread |
+
+### Cara pakai token
+
+Tambahkan header berikut di setiap request yang memerlukan auth:
+
+```
+Authorization: Bearer <access_token>
+```
+
+Token didapat dari response `/api/auth/login` atau `/api/auth/register`.
+
+---
+
+## Error Response Format
+
+Semua error mengikuti format yang konsisten:
+
+```json
+{
+  "statusCode": 403,
+  "message": "Kamu tidak berhak mengubah thread ini",
+  "path": "/api/threads/some-uuid",
+  "timestamp": "2026-04-28T10:00:00.000Z"
+}
+```
+
+| Status Code | Kondisi |
+|---|---|
+| 400 | Validasi gagal (field kosong, format email salah, dll) |
+| 401 | Token tidak ada atau tidak valid |
+| 403 | Token valid tapi bukan pemilik resource |
+| 404 | Resource tidak ditemukan |
+| 409 | Konflik data (email / username sudah dipakai) |
+
+---
+
+## Prisma Scripts
+
+```bash
+npm run prisma:generate   # Generate ulang Prisma Client
+npm run prisma:migrate    # Buat & jalankan migration baru
+npm run prisma:studio     # Buka GUI Prisma Studio di browser
+npm run prisma:seed       # Isi database dengan dummy data
+```
