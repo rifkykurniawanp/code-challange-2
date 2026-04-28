@@ -1,26 +1,75 @@
-import { Injectable } from '@nestjs/common';
-import { CreateAuthDto } from './dto/create-auth.dto';
-import { UpdateAuthDto } from './dto/update-auth.dto';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { AuthRepository } from './repositories/auth.repository';
+import { RegisterRequestDto } from './dto/request/register.request.dto';
+import { LoginRequestDto } from './dto/request/login.request.dto';
+import { AuthResponseDto } from './dto/response/auth.response.dto';
 
 @Injectable()
 export class AuthService {
-  create(createAuthDto: CreateAuthDto) {
-    return 'This action adds a new auth';
+  constructor(
+    private readonly authRepository: AuthRepository,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async register(dto: RegisterRequestDto): Promise<AuthResponseDto> {
+    // Cek duplikasi email / username
+    const existing = await this.authRepository.findByEmailOrUsername(
+      dto.email,
+      dto.username,
+    );
+
+    if (existing) {
+      throw new ConflictException(
+        existing.email === dto.email
+          ? 'Email sudah digunakan'
+          : 'Username sudah diambil',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+
+    const user = await this.authRepository.createUser({
+      username: dto.username,
+      email: dto.email,
+      passwordHash,
+    });
+
+    const token = this.signToken(user.id, user.email, user.username);
+
+    return new AuthResponseDto({
+      message: 'Registrasi berhasil',
+      access_token: token,
+      user,
+    });
   }
 
-  findAll() {
-    return `This action returns all auth`;
+  async login(dto: LoginRequestDto): Promise<AuthResponseDto> {
+    const user = await this.authRepository.findByEmail(dto.email);
+
+    // Pesan error sengaja dibuat samar — jangan beri tahu field mana yang salah
+    if (!user) throw new UnauthorizedException('Email atau password salah');
+
+    const match = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!match) throw new UnauthorizedException('Email atau password salah');
+
+    const token = this.signToken(user.id, user.email, user.username);
+
+    const { passwordHash: _, ...safeUser } = user;
+
+    return new AuthResponseDto({
+      message: 'Login berhasil',
+      access_token: token,
+      user: safeUser,
+    });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} auth`;
-  }
-
-  update(id: number, updateAuthDto: UpdateAuthDto) {
-    return `This action updates a #${id} auth`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} auth`;
+  private signToken(userId: string, email: string, username: string): string {
+    return this.jwtService.sign({ sub: userId, email, username });
   }
 }
